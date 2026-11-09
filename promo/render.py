@@ -15,6 +15,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageChops
 
 W, H, FPS = 1080, 1920, 30
+LAND = False  # True for the 16:9 (YouTube) cut
 
 # ---- Brand palette ------------------------------------------------------------
 # Same art direction as Professional Foods (dark premium base, one strong accent,
@@ -364,16 +365,29 @@ class Scene:
         z = self.kb[0] + (self.kb[1] - self.kb[0]) * ease_in_out(p) if self.mode == "full" else 1.0
         (fx0, fy0), (fx1, fy1) = self.focus
         fx, fy = fx0 + (fx1 - fx0) * ease_in_out(p), fy0 + (fy1 - fy0) * ease_in_out(p)
-        if self.mode == "full":
+        portrait_in_land = LAND and src.size[0] < src.size[1]
+        if self.mode == "full" and not portrait_in_land:
             return cover(src, W, H, z, fx, fy).convert("RGBA")
         # "frame": landscape footage shown wide, over a blurred, darkened copy
         small = cover(src, W // 8, H // 8, 1.0, 0.5, 0.5).filter(ImageFilter.GaussianBlur(5))
         bg = small.resize((W, H), Image.BILINEAR)
         bg = Image.blend(bg, Image.new("RGB", (W, H), CHARCOAL), 0.55).convert("RGBA")
         iw, ih = src.size
-        fw = W - 2 * 0
-        fh = int(fw * 9 / 16) if iw / ih > 1.2 else int(fw * ih / iw)
         z2 = self.kb[0] + (self.kb[1] - self.kb[0]) * ease_in_out(p)
+        if LAND:
+            if iw / ih > 1.2:  # landscape footage fills a 16:9 frame natively
+                return cover(src, W, H, z2, fx, fy).convert("RGBA")
+            fh = H  # portrait source: pillarbox over the blurred copy
+            fw = int(H * iw / ih)
+            inner = cover(src, fw, fh, z2, fx, fy).convert("RGBA")
+            x = (W - fw) // 2
+            bg.alpha_composite(inner, (x, 0))
+            d = ImageDraw.Draw(bg)
+            d.line([(x - 2, 0), (x - 2, H)], fill=ACC + (200,), width=3)
+            d.line([(x + fw, 0), (x + fw, H)], fill=ACC + (200,), width=3)
+            return bg
+        fw = W
+        fh = int(fw * 9 / 16) if iw / ih > 1.2 else int(fw * ih / iw)
         inner = cover(src, fw, fh, z2, fx, fy).convert("RGBA")
         y = self.frame_y if self.frame_y is not None else (H - fh) // 2
         bg.alpha_composite(inner, ((W - fw) // 2, y))
@@ -441,7 +455,7 @@ def render_video(name, scenes, outdir, music, xfade=0.4, preview=False):
                     lk.putalpha(lk.getchannel("A").point(lambda v: int(v * la)))
                     fr.alpha_composite(lk)
             if s.watermark:
-                fr.alpha_composite(watermark(), ((W - watermark().width) // 2, 70))
+                fr.alpha_composite(watermark(), ((W - watermark().width) // 2, 36 if LAND else 70))
             for e in s.elements:
                 e.draw(fr, lt)
             alpha = 1.0
@@ -616,7 +630,9 @@ def reach_bg(t, dur):
     """Motion graphic: gold rings radiating from Cairo, dots lighting up across the country."""
     img = endcard_bg(0, 1)
     d = ImageDraw.Draw(img, "RGBA")
-    cx, cy = W // 2, int(H * 0.47)
+    cx, cy = W // 2, int(H * (0.6 if LAND else 0.47))
+    sx, sy = (1.9, 0.42) if LAND else (1.0, 1.0)
+    rmax = 420 if LAND else 520
     # grid lines (engineering feel)
     for gx in range(0, W, 90):
         d.line([(gx, 0), (gx, H)], fill=(255, 248, 235, 10), width=1)
@@ -625,7 +641,7 @@ def reach_bg(t, dur):
     # pulsing rings
     for k in range(4):
         ph = (t * 0.55 + k / 4) % 1.0
-        r = 40 + ph * 520
+        r = 40 + ph * rmax
         a = int(120 * (1 - ph))
         d.ellipse((cx - r, cy - r, cx + r, cy + r), outline=ACC + (a,), width=3)
     # destinations (abstract, not a literal map)
@@ -636,7 +652,7 @@ def reach_bg(t, dur):
         p = ease_out((t - appear) / 0.6)
         if p <= 0:
             continue
-        x, y = cx + px, cy + py
+        x, y = cx + int(px * sx), cy + int(py * sy)
         # line from centre
         lx = cx + (x - cx) * p
         ly = cy + (y - cy) * p
@@ -660,7 +676,8 @@ def watermark():
     global _WM
     if _WM is None:
         lg = Image.open(LOGO_WHITE)
-        lg = lg.resize((int(lg.width * 120 / lg.height), 120), Image.LANCZOS)
+        hh = 92 if LAND else 120
+        lg = lg.resize((int(lg.width * hh / lg.height), hh), Image.LANCZOS)
         lg.putalpha(lg.getchannel("A").point(lambda v: int(v * 0.9)))
         _WM = with_shadow(lg, radius=10, opacity=0.5)
     return _WM
@@ -737,10 +754,10 @@ class LogoReveal:
 
 def endcard_elements(tagline_ar, tagline_en):
     return [
-        LogoReveal(800, width=700),
-        Text("بروفيشنال ريدي ميكس", "head", 1330, 1.3, 99, size=72),
-        Text(tagline_ar, "sub", 1430, 1.6, 99, size=48),
-        Text(tagline_en, "kicker", 1700, 2.0, 99, size=24),
+        LogoReveal(400 if LAND else 800, width=500 if LAND else 700),
+        Text("بروفيشنال ريدي ميكس", "head", 760 if LAND else 1330, 1.3, 99, size=72),
+        Text(tagline_ar, "sub", 860 if LAND else 1430, 1.6, 99, size=48),
+        Text(tagline_en, "kicker", 1000 if LAND else 1700, 2.0, 99, size=24),
     ]
 
 
@@ -767,6 +784,10 @@ def build(media_dir):
     sideways = "transpose=2"  # these clips were filmed with the phone on its side
 
     TOP, MID, BOT, BOT2, KICK = 300, 1120, 1480, 1600, 1370
+    KF = 380  # kicker position in framed scenes
+    if LAND:
+        TOP, MID, BOT, BOT2, KICK = 120, 540, 830, 935, 715
+        KF = KICK
     end_dur = 4.2
     videos = {}
 
@@ -779,14 +800,14 @@ def build(media_dir):
             Text("بيبدأ من", "sub", BOT - 110, 0.25, 3.0, size=58),
             Text("أساس متين", "accent", BOT + 10, 0.4, 3.0, size=120)]),
         Scene(3.6, Media("vid", V(4), 3.0, sideways), mode="frame", frame_y=560, kb=(1.0, 1.08), elements=[
-            Text("OUR FLEET", "kicker", 380, 0.2, 3.6),
+            Text("OUR FLEET", "kicker", KF, 0.2, 3.6),
             Text("أسطول مضخات وخلاطات", "head", BOT, 0.3, 3.6, size=84),
             Text("جاهز يوصل لموقعك في ميعادك", "sub", BOT2 + 20, 0.6, 3.6, size=48)]),
         Scene(3.2, img("slab_truck"), kb=(1.0, 1.14), focus=((0.2, 0.5), (0.45, 0.5)), elements=[
             Text("صبّ دقيق", "head", BOT, 0.3, 3.2),
             Text("وجودة ثابتة في كل خلطة", "sub", BOT2 + 10, 0.55, 3.2)]),
         Scene(3.6, Media("vid", V(5), 4.0), mode="frame", frame_y=560, kb=(1.0, 1.1), elements=[
-            Text("DAY & NIGHT", "kicker", 380, 0.2, 3.6),
+            Text("DAY & NIGHT", "kicker", KF, 0.2, 3.6),
             Text("شغالين ليل ونهار", "head", BOT, 0.3, 3.6),
             Text("عشان مشروعك ما يستناش", "sub", BOT2 + 10, 0.6, 3.6)]),
         Scene(3.0, img("boom_pink"), kb=(1.18, 1.04), focus=((0.55, 0.4), (0.4, 0.5)), elements=[
@@ -805,9 +826,9 @@ def build(media_dir):
             Text("OUR PROJECTS", "kicker", KICK, 0.3, 3.0),
             Text("مشاريعنا بتتكلم", "head", BOT, 0.45, 3.0)]),
         Scene(3.8, Media("vid", V(4), 15.0, sideways), mode="frame", frame_y=560, kb=(1.0, 1.08), elements=[
-            Text("WEST CAIRO", "kicker", 380, 0.2, 3.8),
+            Text("WEST CAIRO", "kicker", KF, 0.2, 3.8),
             Text("غرب القاهرة", "accent", BOT - 30, 0.3, 3.8, size=112),
-            Chips(["٦ أكتوبر", "الشيخ زايد", "الجيزة"], BOT2 + 50, 0.8, 3.8)]),
+            Chips(["٦ أكتوبر", "الشيخ زايد", "الجيزة"], BOT2 + (35 if LAND else 50), 0.8, 3.8)]),
         Scene(3.0, img("excav"), kb=(1.0, 1.15), focus=((0.25, 0.5), (0.5, 0.5)), elements=[
             Text("مشاريع سكنية", "head", BOT, 0.3, 3.0),
             Text("وتجارية وصناعية", "sub", BOT2 + 10, 0.55, 3.0)]),
@@ -815,7 +836,7 @@ def build(media_dir):
             Text("GOVERNMENT PROJECTS", "kicker", KICK, 0.2, 3.2),
             Text("ومشاريع حكومية كبرى", "head", BOT, 0.35, 3.2, size=92)]),
         Scene(3.6, Media("vid", V(6), 8.0, sideways), mode="frame", frame_y=560, kb=(1.0, 1.1), elements=[
-            Text("FROM FOUNDATION UP", "kicker", 380, 0.2, 3.6),
+            Text("FROM FOUNDATION UP", "kicker", KF, 0.2, 3.6),
             Text("من الأساسات", "head", BOT, 0.3, 3.6),
             Text("لحد آخر صبة", "accent", BOT2 + 20, 0.6, 3.6, size=80)]),
         Scene(3.0, img("deep_found"), kb=(1.12, 1.0), focus=((0.5, 0.5), (0.5, 0.5)), elements=[
@@ -833,18 +854,18 @@ def build(media_dir):
             Text("BEYOND CAIRO & GIZA", "kicker", KICK, 0.3, 3.0),
             Text("مش بس القاهرة والجيزة", "head", BOT, 0.45, 3.0, size=90)]),
         Scene(4.0, motion=reach_bg, grade=False, elements=[
-            Text("شغلنا وصل", "head", 300, 0.4, 4.0),
-            Text("لمحافظات كتير", "accent", 430, 0.7, 4.0, size=110),
-            Text("ACROSS EGYPT'S GOVERNORATES", "kicker", 1650, 1.2, 4.0)]),
+            Text("شغلنا وصل", "head", 105 if LAND else 300, 0.4, 4.0),
+            Text("لمحافظات كتير", "accent", 225 if LAND else 430, 0.7, 4.0, size=110),
+            Text("ACROSS EGYPT'S GOVERNORATES", "kicker", 1020 if LAND else 1650, 1.2, 4.0)]),
         Scene(3.4, Media("vid", V(4), 20.0, sideways), mode="frame", frame_y=560, kb=(1.0, 1.08), elements=[
-            Text("SAME STANDARD", "kicker", 380, 0.2, 3.4),
+            Text("SAME STANDARD", "kicker", KF, 0.2, 3.4),
             Text("نفس الجودة", "head", BOT, 0.3, 3.4),
             Text("ونفس الالتزام في كل موقع", "sub", BOT2 + 10, 0.6, 3.4)]),
         Scene(3.0, img("yellow_boom"), kb=(1.0, 1.15), focus=((0.3, 0.5), (0.55, 0.45)), elements=[
             Text("أسطول جاهز للتنقل", "head", BOT, 0.3, 3.0, size=92),
             Text("لأي مكان مشروعك فيه", "sub", BOT2 + 10, 0.55, 3.0)]),
         Scene(3.4, Media("vid", V(5), 12.0), mode="frame", frame_y=560, kb=(1.0, 1.1), elements=[
-            Text("ON TIME", "kicker", 380, 0.2, 3.4),
+            Text("ON TIME", "kicker", KF, 0.2, 3.4),
             Text("مهما كانت المسافة", "head", BOT, 0.3, 3.4, size=92),
             Text("الصبة في ميعادها", "accent", BOT2 + 20, 0.6, 3.4, size=80)]),
         Scene(3.0, img("boom_slab_pink"), kb=(1.15, 1.02), focus=((0.6, 0.5), (0.4, 0.5)), elements=[
@@ -868,7 +889,11 @@ def main():
     ap.add_argument("--only", default="1,2,3")
     ap.add_argument("--preview", action="store_true")
     ap.add_argument("--voice", default="Algenib")
+    ap.add_argument("--aspect", default="9x16", choices=["9x16", "16x9"])
     ARGS = ap.parse_args()
+    global W, H, LAND
+    if ARGS.aspect == "16x9":
+        W, H, LAND = 1920, 1080, True
     os.makedirs(ARGS.out, exist_ok=True)
     init_finish()
     vids = build(ARGS.media)
@@ -916,7 +941,8 @@ def main():
                       for st, sc in zip(starts, scenes) if sc.vo]
             mix_audio(tot, bed, events, path)
 
-        render_video(name, scenes, ARGS.out, music, xfade=xf, preview=ARGS.preview)
+        suffix = "-16x9" if LAND else ""
+        render_video(name + suffix, scenes, ARGS.out, music, xfade=xf, preview=ARGS.preview)
 
 
 if __name__ == "__main__":

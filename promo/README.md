@@ -1,6 +1,6 @@
 # Professional Ready Mix — Brand promo videos
 
-Three short vertical (9:16, 1080×1920) promos for **Professional Ready Mix**
+Three short promos, rendered as vertical 9:16 (1080×1920) and YouTube 16:9 (1920×1080) (`--aspect 16x9`), for **Professional Ready Mix**
 (بروفيشنال ريدي ميكس). Their job is brand identity and presence. They use the same
 art direction as the Professional Foods promos (dark premium base, one strong accent
 color, spaced-caps English kickers, cinematic grade, short Arabic headlines), but they
